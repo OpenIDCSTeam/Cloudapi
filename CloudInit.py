@@ -70,6 +70,18 @@ class Cloudinit:
                                 continue
                             self.vm_config["vm_uuid"] = vm_data["vm_uuid"]
                             self.vm_config["vm_pass"] = vm_data["vm_pass"]
+                            
+                            # 检查 vm_flag 状态
+                            vm_flag = vm_data.get("vm_flag", "")
+                            if vm_flag == "ON_STOP" or vm_flag == "S_CLOSE":
+                                logger.warning("[虚拟机控制] 收到关机指令，准备关机")
+                                self.shutdown_system()
+                                return
+                            elif vm_flag == "S_RESET":
+                                logger.warning("[虚拟机控制] 收到重启指令，准备重启")
+                                self.reboot_system()
+                                return
+                            
                             self.manage()
                     except requests.exceptions.ConnectionError as e:
                         logger.error("[上报虚拟机状态异常]", e)
@@ -160,13 +172,27 @@ class Cloudinit:
                     logger.info("[Windows主机名] 当前主机名已经是: {}，无需修改", vm_uuid)
                 else:
                     logger.info("[Windows主机名] 当前主机名: {}，需要修改为: {}", current_hostname, vm_uuid)
+                    
+                    # 方案1: 使用 netdom (兼容 Windows 7)
+                    logger.info("[Windows主机名] 尝试使用 netdom 设置主机名")
+                    netdom_cmd = f'netdom renamecomputer %computername% /newname:{vm_uuid} /force'
                     result = subprocess.run(
-                        ["wmic", "computersystem", "where", "name='%computername%'", "rename", vm_uuid],
+                        netdom_cmd,
                         capture_output=True, text=True, shell=True)
+                    
                     if result.returncode == 0:
-                        logger.info("[Windows主机名] 主机名设置成功，需要重启后生效: {}", vm_uuid)
+                        logger.info("[Windows主机名] netdom 设置成功，需要重启后生效: {}", vm_uuid)
                     else:
-                        logger.error("[Windows主机名] 设置失败: {}", result.stderr)
+                        # 方案2: 备用 PowerShell Rename-Computer (Windows 8+)
+                        logger.warning("[Windows主机名] netdom 设置失败: {}，尝试使用 Rename-Computer", result.stderr)
+                        powershell_cmd = f'Rename-Computer -NewName "{vm_uuid}" -Force'
+                        result = subprocess.run(
+                            ["powershell", "-Command", powershell_cmd],
+                            capture_output=True, text=True, shell=True)
+                        if result.returncode == 0:
+                            logger.info("[Windows主机名] Rename-Computer 设置成功，需要重启后生效: {}", vm_uuid)
+                        else:
+                            logger.error("[Windows主机名] 两种方式均设置失败: {}", result.stderr)
 
                 # 设置administrator密码
                 logger.info("[Windows密码] 设置administrator密码")
@@ -284,6 +310,36 @@ class Cloudinit:
             logger.error("[Windows hosts] 读取或写入 hosts 文件失败: {}", e)
         except Exception as e:
             logger.error("[Windows hosts] 更新 hosts 文件异常: {}", e)
+
+    def shutdown_system(self):
+        """执行系统关机命令"""
+        system = platform.system().lower()
+        try:
+            if system == "linux":
+                logger.info("[系统关机] 执行 Linux 关机命令")
+                subprocess.run(["sudo", "shutdown", "-h", "now"], check=True)
+            elif system == "windows":
+                logger.info("[系统关机] 执行 Windows 关机命令")
+                subprocess.run(["shutdown", "/s", "/t", "0", "/f"], check=True)
+            else:
+                logger.warning("[系统关机] 不支持的操作系统: {}", system)
+        except Exception as e:
+            logger.error("[系统关机] 关机命令执行失败: {}", e)
+
+    def reboot_system(self):
+        """执行系统重启命令"""
+        system = platform.system().lower()
+        try:
+            if system == "linux":
+                logger.info("[系统重启] 执行 Linux 重启命令")
+                subprocess.run(["sudo", "reboot"], check=True)
+            elif system == "windows":
+                logger.info("[系统重启] 执行 Windows 重启命令")
+                subprocess.run(["shutdown", "/r", "/t", "0", "/f"], check=True)
+            else:
+                logger.warning("[系统重启] 不支持的操作系统: {}", system)
+        except Exception as e:
+            logger.error("[系统重启] 重启命令执行失败: {}", e)
 
     def extend(self):
         system = platform.system().lower()

@@ -21,29 +21,41 @@ class VMStatus:
     def status(self) -> HWStatus:
         self.vm_status.ac_status = VMPowers.STARTED
         # 获取CPU信息 =======================================================
-        self.vm_status.cpu_total = psutil.cpu_count(logical=True)
-        self.vm_status.cpu_usage = int(psutil.cpu_percent(interval=1))
+        try:
+            self.vm_status.cpu_total = psutil.cpu_count(logical=True)
+            self.vm_status.cpu_usage = int(psutil.cpu_percent(interval=1))
+        except Exception as e:
+            import traceback
+            print(f"获取CPU信息失败: {e}")
+            traceback.print_exc()
         # 获取内存信息 ======================================================
-        mem = psutil.virtual_memory()
-        self.vm_status.mem_total = int(mem.total / (1024 * 1024))  # 转换为MB
-        self.vm_status.mem_usage = int(mem.used / (1024 * 1024))  # 内存已用量
+        try:
+            mem = psutil.virtual_memory()
+            self.vm_status.mem_total = int(mem.total / (1024 * 1024))  # 转换为MB
+            self.vm_status.mem_usage = int(mem.used / (1024 * 1024))  # 内存已用量
+        except Exception as e:
+            import traceback
+            print(f"获取内存信息失败: {e}")
+            traceback.print_exc()
         # 获取系统磁盘信息 ==================================================
-        disk_usage = psutil.disk_usage('/')
-        self.vm_status.hdd_total = int(disk_usage.total / (1024 * 1024))
-        self.vm_status.hdd_usage = int(disk_usage.used / (1024 * 1024))
-        # 获取其他磁盘信息 ==================================================
-        for disk in psutil.disk_partitions():
-            if disk.mountpoint != '/':
-                usage = psutil.disk_usage(disk.mountpoint)
-                self.vm_status.ext_usage[disk.mountpoint] = [
-                    int(usage.total / (1024 * 1024)),  # 总空间MB
-                    int(usage.used / (1024 * 1024))  # 已用空间MB
-                ]
+        try:
+            disk_usage = psutil.disk_usage('/')
+            self.vm_status.hdd_total = int(disk_usage.total / (1024 * 1024))
+            self.vm_status.hdd_usage = int(disk_usage.used / (1024 * 1024))
+        except Exception as e:
+            import traceback
+            print(f"获取系统磁盘信息失败: {e}")
+            traceback.print_exc()
         # 获取GPU信息 =======================================================
-        gpus = GPUtil.getGPUs()
-        self.vm_status.gpu_total = len(gpus)
-        for gpu in gpus:
-            self.vm_status.gpu_usage[gpu.id] = int(gpu.load * 100)  # 使用率
+        try:
+            gpus = GPUtil.getGPUs()
+            self.vm_status.gpu_total = len(gpus)
+            for gpu in gpus:
+                self.vm_status.gpu_usage[gpu.id] = int(gpu.load * 100)  # 使用率
+        except Exception as e:
+            import traceback
+            print(f"获取GPU信息失败: {e}")
+            traceback.print_exc()
         # 获取网络带宽 ======================================================
         nic_list = psutil.net_io_counters(True)
         max_name = ""
