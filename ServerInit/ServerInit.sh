@@ -6,13 +6,24 @@ cp ./ServerInit.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now ServerInit
 
-# 配置 systemd-networkd 网络
-echo "[网络配置] 启用 systemd-networkd"
-systemctl enable --now systemd-networkd
+# 检测操作系统类型
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS_ID=$ID
+else
+    OS_ID=$(uname -s)
+fi
 
-# 创建网络配置文件
-mkdir -p /etc/systemd/network
-cat > /etc/systemd/network/99-dhcp-any.network << 'EOF'
+echo "[网络配置] 检测到操作系统: $OS_ID"
+
+# 根据操作系统类型配置网络
+case "$OS_ID" in
+    ubuntu|debian|arch|opensuse*)
+        echo "[网络配置] 使用 systemd-networkd 配置网络"
+        systemctl enable --now systemd-networkd
+
+        mkdir -p /etc/systemd/network
+        cat > /etc/systemd/network/99-dhcp-any.network << 'EOF'
 [Match]
 Name=*
 
@@ -20,9 +31,35 @@ Name=*
 DHCP=yes
 EOF
 
-echo "[网络配置] 网络配置文件已创建: /etc/systemd/network/99-dhcp-any.network"
-systemctl restart systemd-networkd
-echo "[网络配置] systemd-networkd 已重启"
+        echo "[网络配置] 网络配置文件已创建: /etc/systemd/network/99-dhcp-any.network"
+        systemctl restart systemd-networkd
+        echo "[网络配置] systemd-networkd 已重启"
+        ;;
+    
+    centos|rhel|fedora|almalinux|rocky|ol)
+        echo "[网络配置] 使用 NetworkManager 配置网络"
+        
+        # 确保 NetworkManager 已启用
+        systemctl enable --now NetworkManager
+        
+        # 使用 nmcli 配置 DHCP
+        # 获取活动的网络接口
+        for interface in $(nmcli -t -f DEVICE device status | grep -v "^lo"); do
+            echo "[网络配置] 配置接口 $interface 为 DHCP"
+            nmcli con modify "$interface" ipv4.method auto 2>/dev/null || \
+            nmcli device connect "$interface" 2>/dev/null
+        done
+        
+        # 重启 NetworkManager 应用配置
+        systemctl restart NetworkManager
+        echo "[网络配置] NetworkManager 已重启"
+        ;;
+    
+    *)
+        echo "[网络配置] 未知操作系统 $OS_ID，跳过网络配置"
+        echo "[网络配置] 请手动配置网络"
+        ;;
+esac
 
 # 1. 清用户级 bash 历史（当前会话也清）
 history -c && history -w
